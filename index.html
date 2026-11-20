@@ -1,0 +1,460 @@
+
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOXI DASH 4.0</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080918;color:white;font-family:Arial;overflow:hidden}
+#game{height:100vh;width:100vw;position:relative}
+canvas{width:100%;height:100%;display:block;touch-action:none}
+.screen{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#080918eF;z-index:5;padding:12px}
+.panel{width:min(650px,96vw);max-height:90vh;overflow:auto;background:#11162f;border:2px solid #35eaff;border-radius:20px;padding:24px;text-align:center;box-shadow:0 0 30px #20dfff33}
+.logo{font-size:clamp(35px,7vw,60px);font-weight:1000;color:#35efff;text-shadow:0 0 20px #00cfff;letter-spacing:4px}
+button{border:0;border-radius:10px;padding:13px 19px;margin:5px;background:linear-gradient(110deg,#35eaff,#9862ff);color:#090d20;font-weight:900;cursor:pointer}
+#levelGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:15px}
+#levelGrid button{margin:0;padding:13px 2px}
+.locked{opacity:.3}
+#hud{position:absolute;top:12px;left:0;width:100%;display:none;justify-content:space-between;padding:0 15px;z-index:3;font-weight:bold;pointer-events:none}
+#progress{position:absolute;top:48px;left:10%;width:80%;height:9px;background:#34344d;border-radius:20px;display:none;z-index:3;overflow:hidden}
+#fill{height:100%;width:0;background:#35efff}
+#mobile{position:absolute;bottom:15px;right:15px;z-index:4;display:none}
+#mobile button{font-size:18px;padding:20px;touch-action:none}
+.small{color:#a9b9d8;font-size:13px}
+</style>
+</head>
+<body>
+<div id="game">
+<canvas id="c" width="960" height="540"></canvas>
+
+<div id="hud">
+ <span>⚡ LOXI DASH</span>
+ <span>💎 <b id="coins">0</b></span>
+ <span id="levelTitle">LEVEL 1</span>
+</div>
+<div id="progress"><div id="fill"></div></div>
+<div id="mobile"><button id="jumpBtn">DRŽ JUMP ⬆</button></div>
+
+<div class="screen" id="menu">
+ <div class="panel">
+  <div class="logo">LOXI DASH</div>
+  <p>VERSION 4.0 – 25 LEVELS</p>
+  <p>🏆 Dobývej nové mapy!</p>
+  <button onclick="levelsMenu()">VYBRAT LEVEL ▶</button>
+  <p class="small">DRŽ LEVÉ TLAČÍTKO = OPAKOVANÉ SKÁKÁNÍ</p>
+  <p class="small">💎 Mince: <span id="totalCoins">0</span></p>
+ </div>
+</div>
+
+<div class="screen" id="levels" style="display:none">
+ <div class="panel">
+  <div class="logo" style="font-size:35px">25 LEVELŮ</div>
+  <p>Každý level je těžší a má vlastní mapu.</p>
+  <div id="levelGrid"></div>
+  <button onclick="home()">ZPĚT</button>
+ </div>
+</div>
+
+<div class="screen" id="end" style="display:none">
+ <div class="panel">
+  <div class="logo" id="endTitle">GAME OVER</div>
+  <p id="endText"></p>
+  <button onclick="retry()">HRÁT ZNOVU ↻</button>
+  <button onclick="levelsMenu()">LEVELY</button>
+  <button onclick="home()">MENU</button>
+ </div>
+</div>
+
+<div class="screen" id="pause" style="display:none">
+ <div class="panel">
+  <div class="logo">PAUZA</div>
+  <button onclick="resume()">POKRAČOVAT ▶</button>
+  <button onclick="home()">MENU</button>
+ </div>
+</div>
+</div>
+
+<script>
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d");
+const W=960,H=540,G=420;
+
+const themes=[
+["#25efff","#101b42"],["#a66aff","#201044"],
+["#ff4b9d","#35102e"],["#ffdf55","#342810"],
+["#52ff9b","#103627"],["#ff713d","#391b19"],
+["#38aaff","#102d4a"],["#ef66ff","#321044"],
+["#ffffff","#242a43"],["#ff5555","#351016"],
+["#44ffe0","#103c3b"],["#ff9d40","#382414"],
+["#9a8cff","#211b4a"],["#f8e65a","#333016"],
+["#ff6cbb","#39102e"],["#42d5ff","#102e44"],
+["#7bff58","#153316"],["#ff754d","#391b10"],
+["#d66aff","#29103e"],["#ffffff","#303040"],
+["#ff376e","#35101c"],["#40fff0","#103b3d"],
+["#ffe15c","#332710"],["#ae70ff","#27103d"],
+["#ff3030","#350c12"]
+];
+
+const names=[
+"FIRST STEP","BLUE CITY","PURPLE SKY","GOLD RUSH","GREEN LAND",
+"FIRE ROAD","SKY HIGH","DARK MAGIC","WHITE STORM","RED ZONE",
+"OCEAN","DESERT","NIGHT CITY","SUN POWER","PINK WORLD",
+"CYBER RUN","JUNGLE","LAVA","SPACE","ICE WORLD",
+"HELL RUN","NEON STORM","GOLDEN NIGHT","EXTREME","FINAL BOSS"
+];
+
+const lengths=Array.from({length:25},(_,i)=>14000+i*650);
+const speeds=Array.from({length:25},(_,i)=>5.5+i*.12);
+
+let unlocked=Number(localStorage.getItem("ldunlock")||1);
+let totalCoins=Number(localStorage.getItem("ldcoins")||0);
+let current=0,world=0,frame=0,runCoins=0;
+let state="menu",speed=6,player;
+let obstacles=[],orbs=[],particles=[];
+let seed=1,jumpHeld=false;
+
+function random(){
+ seed=(seed*1664525+1013904223)>>>0;
+ return seed/4294967296;
+}
+function show(id){
+ document.querySelectorAll(".screen").forEach(e=>e.style.display="none");
+ document.getElementById(id).style.display="flex";
+}
+function hud(showHud){
+ document.getElementById("hud").style.display=showHud?"flex":"none";
+ document.getElementById("progress").style.display=showHud?"block":"none";
+ document.getElementById("mobile").style.display=showHud?"block":"none";
+}
+function home(){
+ jumpHeld=false;state="menu";show("menu");hud(false);
+}
+function levelsMenu(){
+ jumpHeld=false;show("levels");
+ let grid=document.getElementById("levelGrid");
+ grid.innerHTML="";
+ for(let i=0;i<25;i++){
+  let b=document.createElement("button");
+  b.textContent=(i+1).toString().padStart(2,"0")+(i<unlocked?" ✓":" 🔒");
+  b.style.background=i<unlocked?themes[i][0]:"#414354";
+  b.className=i<unlocked?"":"locked";
+  b.disabled=i>=unlocked;
+  b.onclick=()=>start(i);
+  grid.appendChild(b);
+ }
+}
+function start(i){
+ current=i;seed=12345+i*98765;
+ world=0;frame=0;runCoins=0;
+ speed=speeds[i];obstacles=[];orbs=[];particles=[];
+ player={x:150,y:G-42,size:42,vy:0,ground:true,rot:0};
+ generateMap();
+ state="playing";jumpHeld=false;
+ show("menu");
+ document.getElementById("menu").style.display="none";
+ hud(true);
+ document.getElementById("levelTitle").textContent="LEVEL "+(i+1)+" – "+names[i];
+ updateCoins();
+}
+function retry(){start(current)}
+function updateCoins(){
+ document.getElementById("coins").textContent=totalCoins+runCoins;
+ document.getElementById("totalCoins").textContent=totalCoins;
+}
+
+function generateMap(){
+ let x=700,index=0;
+ while(x<lengths[current]+1000){
+  let r=random(),type;
+  const difficulty=current/24;
+
+  if(r<.12+difficulty*.12)type="block";
+  else if(r<.32+difficulty*.18)type="double";
+  else if(r<.48+difficulty*.12)type="triple";
+  else if(r<.57+difficulty*.12)type="tall";
+  else type="spike";
+
+  let width=type==="double"?80:type==="triple"?120:40;
+  let height=type==="block"?55:type==="tall"?85:43;
+  obstacles.push({x,type,width,height});
+
+  if(index%2===0||random()<.35){
+   orbs.push({x:x+70,y:G-110-random()*55,used:false});
+  }
+  let gap=380-difficulty*155+random()*130;
+  x+=Math.max(205,gap);
+  index++;
+ }
+}
+
+// SKÁKÁNÍ
+function jump(){
+ if(state!=="playing")return;
+ if(player.ground){
+  player.vy=-14;
+  player.ground=false;
+ }
+}
+function beginHold(e){
+ if(e)e.preventDefault();
+ jumpHeld=true;
+ jump();
+}
+function endHold(){
+ jumpHeld=false;
+}
+
+canvas.addEventListener("pointerdown",beginHold);
+window.addEventListener("pointerup",endHold);
+window.addEventListener("pointercancel",endHold);
+window.addEventListener("blur",endHold);
+
+const jumpBtn=document.getElementById("jumpBtn");
+jumpBtn.addEventListener("pointerdown",beginHold);
+jumpBtn.addEventListener("pointerup",endHold);
+jumpBtn.addEventListener("pointerleave",endHold);
+jumpBtn.addEventListener("pointercancel",endHold);
+
+document.addEventListener("keydown",e=>{
+ if(e.code==="Space"||e.code==="ArrowUp"){
+  e.preventDefault();
+  if(!jumpHeld){jumpHeld=true;jump()}
+ }
+ if(e.code==="Escape"||e.code==="KeyP")pause();
+});
+document.addEventListener("keyup",e=>{
+ if(e.code==="Space"||e.code==="ArrowUp")endHold();
+});
+
+function pause(){
+ if(state==="playing"){
+  jumpHeld=false;state="paused";show("pause");
+ }
+}
+function resume(){
+ state="playing";show("menu");
+ document.getElementById("menu").style.display="none";
+}
+
+function die(){
+ state="dead";jumpHeld=false;show("end");hud(false);
+ document.getElementById("endTitle").textContent="GAME OVER";
+ document.getElementById("endText").textContent=
+ "Dostal ses na "+Math.floor(world/lengths[current]*100)+" % levelu.";
+}
+function win(){
+ state="won";jumpHeld=false;
+ totalCoins+=runCoins+20;
+ localStorage.setItem("ldcoins",totalCoins);
+ if(current+2>unlocked){
+  unlocked=current+2;
+  localStorage.setItem("ldunlock",unlocked);
+ }
+ updateCoins();
+ show("end");hud(false);
+ document.getElementById("endTitle").textContent="LEVEL COMPLETE! 🏆";
+ document.getElementById("endText").textContent=
+ "Gratulujeme! Získal jsi "+(runCoins+20)+" mincí. Další level je odemčen!";
+}
+
+// FYZIKA BLOKŮ A KOLIZE
+function updatePhysics(){
+ let p=player;
+ let previousBottom=p.y+p.size;
+
+ p.vy+=.68;
+ p.y+=p.vy;
+ p.ground=false;
+
+ // Přistání na pevných blocích
+ for(const o of obstacles){
+  if(o.type!=="block")continue;
+  let x=o.x-world;
+  let top=G-o.height;
+  let horizontal=p.x+p.size-5>x+3 && p.x+5<x+o.width-3;
+  let crossed=previousBottom<=top+4 && p.y+p.size>=top && p.vy>=0;
+
+  if(horizontal&&crossed){
+   p.y=top-p.size;
+   p.vy=0;
+   p.ground=true;
+  }
+
+  // Náraz do boku bloku
+  let sideHit=horizontal&&p.y+p.size>top+8&&p.y< G-3;
+  if(sideHit&&!crossed&&p.y+p.size>top+10){
+   die();return false;
+  }
+ }
+
+ // Podlaha
+ if(p.y+p.size>=G){
+  p.y=G-p.size;
+  p.vy=0;
+  p.ground=true;
+ }
+
+ // Automatické opakované skákání při držení
+ if(jumpHeld&&p.ground){
+  p.vy=-14;
+  p.ground=false;
+ }
+
+ if(p.ground){
+  p.rot=Math.round(p.rot/(Math.PI/2))*(Math.PI/2);
+ }else{
+  p.rot+=.1;
+ }
+ return true;
+}
+
+function hitSpike(o){
+ let x=o.x-world;
+ let p=player;
+ let width=o.width,height=o.height;
+ let px=p.x+7,py=p.y+7,pw=28,ph=28;
+ return px<x+width-8&&px+pw>x+7&&py+ph>G-height+7;
+}
+function update(){
+ if(state!=="playing")return;
+ frame++;
+ world+=speed;
+
+ if(!updatePhysics())return;
+
+ for(let o of obstacles){
+  if(o.type==="block")continue;
+  if(hitSpike(o)){die();return}
+ }
+
+ for(let o of orbs){
+  let x=o.x-world;
+  if(!o.used&&x>player.x-15&&x<player.x+35&&
+    Math.abs(o.y-player.y-20)<48){
+   o.used=true;runCoins++;
+   particles.push({x:player.x,y:player.y,color:"#ffe45c",life:25});
+  }
+ }
+
+ particles.forEach(p=>p.life--);
+ particles=particles.filter(p=>p.life>0);
+
+ document.getElementById("fill").style.width=
+ Math.min(100,world/lengths[current]*100)+"%";
+ updateCoins();
+ if(world>=lengths[current])win();
+}
+
+function drawBackground(){
+ const theme=themes[current]||themes[0];
+ let g=ctx.createLinearGradient(0,0,0,H);
+ g.addColorStop(0,theme[1]);g.addColorStop(1,"#080918");
+ ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+
+ for(let i=0;i<55;i++){
+  let x=(i*173-world*.18)%W;
+  if(x<0)x+=W;
+  let y=(i*71)%G;
+  ctx.fillStyle="#ffffff66";ctx.fillRect(x,y,2,2);
+ }
+
+ ctx.strokeStyle="#ffffff15";
+ for(let x=-(world*.35%60);x<W;x+=60){
+  ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,G);ctx.stroke();
+ }
+ ctx.fillStyle="#151b37";ctx.fillRect(0,G,W,H-G);
+ ctx.fillStyle=theme[0];ctx.shadowColor=theme[0];ctx.shadowBlur=20;
+ ctx.fillRect(0,G,W,4);ctx.shadowBlur=0;
+
+ for(let i=0;i<14;i++){
+  let x=(i*100-world*.22)%1100;
+  if(x<0)x+=1100;
+  let h=45+(i%4)*25;
+  ctx.fillStyle="#ffffff12";
+  ctx.fillRect(x,G-h,55,h);
+ }
+}
+
+function drawObstacles(){
+ for(let o of obstacles){
+  let x=o.x-world;
+  if(x<-150||x>W+150)continue;
+  ctx.save();
+  ctx.fillStyle=themes[current][0];
+  ctx.shadowColor=themes[current][0];ctx.shadowBlur=17;
+
+  if(o.type==="block"){
+   ctx.fillRect(x,G-o.height,o.width,o.height);
+   ctx.strokeStyle="white";ctx.strokeRect(x,G-o.height,o.width,o.height);
+   // Horní plocha
+   ctx.fillStyle="#ffffff55";
+   ctx.fillRect(x,G-o.height,o.width,5);
+  }else{
+   let n=o.type==="double"?2:o.type==="triple"?3:1;
+   for(let j=0;j<n;j++){
+    ctx.beginPath();
+    ctx.moveTo(x+j*40,G);
+    ctx.lineTo(x+20+j*40,G-o.height);
+    ctx.lineTo(x+40+j*40,G);
+    ctx.closePath();ctx.fill();
+   }
+  }
+  ctx.restore();
+ }
+}
+function drawCoins(){
+ for(let o of orbs){
+  if(o.used)continue;
+  let x=o.x-world;
+  if(x<0||x>W)continue;
+  ctx.beginPath();ctx.arc(x,o.y,12,0,Math.PI*2);
+  ctx.fillStyle="#ffe45c";ctx.shadowColor="#ffe45c";
+  ctx.shadowBlur=20;ctx.fill();ctx.shadowBlur=0;
+ }
+}
+function drawPlayer(){
+ let p=player;
+ ctx.save();ctx.translate(p.x+21,p.y+21);ctx.rotate(p.rot);
+ ctx.fillStyle=themes[current][0];
+ ctx.shadowColor=ctx.fillStyle;ctx.shadowBlur=25;
+ ctx.fillRect(-21,-21,42,42);
+ ctx.shadowBlur=0;
+ ctx.strokeStyle="white";ctx.lineWidth=2;
+ ctx.strokeRect(-21,-21,42,42);
+ ctx.fillStyle="#11152d";
+ ctx.fillRect(-12,-9,8,9);ctx.fillRect(5,-9,8,9);
+ ctx.fillRect(-8,7,16,4);
+ ctx.restore();
+}
+function drawParticles(){
+ for(let p of particles){
+  ctx.globalAlpha=p.life/25;
+  ctx.fillStyle=p.color;
+  ctx.fillRect(p.x,p.y,6,6);
+ }
+ ctx.globalAlpha=1;
+}
+function draw(){
+ drawBackground();
+ if(state==="playing"||state==="paused"){
+  drawCoins();drawObstacles();drawPlayer();drawParticles();
+ }else{
+  let t=Date.now()/1000;
+  for(let i=0;i<5;i++){
+   ctx.save();ctx.translate(120+i*180,260+Math.sin(t*2+i)*35);
+   ctx.rotate(t+i);ctx.fillStyle=themes[i*4][0];
+   ctx.shadowColor=ctx.fillStyle;ctx.shadowBlur=20;
+   ctx.fillRect(-18,-18,36,36);ctx.restore();
+  }
+ }
+}
+function loop(){
+ update();draw();requestAnimationFrame(loop);
+}
+updateCoins();
+loop();
+</script>
+</body>
+</html>
