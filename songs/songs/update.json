@@ -2,3 +2,13 @@
   "enabled": true,
   "songs": []
 }
+{
+  "enabled": true,
+  "songs": [
+    {
+      "title": "Nový song",
+      "file": "songs/music/song1.mp3",
+      "release": "2026-11-25T18:00:00"
+    }
+  ]
+}
